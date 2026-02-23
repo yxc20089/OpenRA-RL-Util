@@ -224,13 +224,13 @@ class TestCosts:
 
     def test_unit_costs(self):
         assert get_unit_cost("e1") == 100
-        assert get_unit_cost("4tnk") == 1700
-        assert get_unit_cost("harv") == 1400
+        assert get_unit_cost("4tnk") == 2000
+        assert get_unit_cost("harv") == 1100
 
     def test_building_costs(self):
-        assert get_building_cost("fact") == 2500
+        assert get_building_cost("fact") == 2000
         assert get_building_cost("powr") == 300
-        assert get_building_cost("tsla") == 1500
+        assert get_building_cost("tsla") == 1200
 
     def test_unknown_cost_is_zero(self):
         assert get_unit_cost("nonexistent") == 0
@@ -238,5 +238,5 @@ class TestCosts:
 
     def test_building_armor_types(self):
         assert get_building_armor("powr") == "wood"
-        assert get_building_armor("tsla") == "concrete"
-        assert get_building_armor("pbox") == "concrete"
+        assert get_building_armor("tsla") == "heavy"
+        assert get_building_armor("pbox") == "heavy"
