@@ -5,9 +5,7 @@ description = "Shared utilities for the OpenRA-RL ecosystem — reward vector, d
 readme = "README.md"
 license = {text = "GPL-3.0"}
 requires-python = ">=3.10"
-dependencies = [
-    "openenv-core>=0.2.1",
-]
+dependencies = []
 
 [project.optional-dependencies]
 dev = [

@@ -36,7 +36,7 @@ Usage:
 
 from typing import Any, Dict, List, Tuple
 
-from openenv.core.rubrics import (
+from openra_rl_util.rubric_base import (
     ExponentialDiscountingTrajectoryRubric,
     TrajectoryRubric,
     WeightedSum,
