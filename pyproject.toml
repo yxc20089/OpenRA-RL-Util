@@ -1,0 +1,20 @@
+[project]
+name = "openra-rl-util"
+version = "0.1.0"
+description = "Shared utilities for the OpenRA-RL ecosystem — reward vector, damage matrix, scoring rubrics"
+readme = "README.md"
+license = {text = "GPL-3.0"}
+requires-python = ">=3.10"
+dependencies = [
+    "openenv-core>=0.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
