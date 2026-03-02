@@ -390,3 +390,45 @@ class TestMultiTick:
         v = c.compute(basic_obs)
         for dim_name, val in v.as_dict().items():
             assert -1.0 <= val <= 1.0, f"{dim_name} = {val} out of bounds"
+
+
+class TestEconomyHoardingPenalty:
+    """Economy reward should favor investment over hoarding."""
+
+    def test_hoarding_cash_scores_less_than_investing(self):
+        """Same total growth but cash-heavy should score less than assets-heavy."""
+        c1 = RewardVectorComputer()
+        c2 = RewardVectorComputer()
+
+        # Tick 0: both start same
+        base_obs = {
+            "military": {"kills_cost": 0, "deaths_cost": 0, "units_killed": 0,
+                         "units_lost": 0, "buildings_killed": 0, "buildings_lost": 0,
+                         "assets_value": 5000, "order_count": 0},
+            "economy": {"cash": 5000, "ore": 0, "power_provided": 100,
+                        "power_drained": 0, "harvester_count": 1},
+            "units": [], "buildings": [], "visible_enemies": [],
+            "visible_enemy_buildings": [], "production_queues": [],
+            "done": False, "result": "", "tick": 0,
+        }
+        c1.compute(dict(base_obs))
+        c2.compute(dict(base_obs))
+
+        import copy
+        # Hoarding agent: cash grows, assets flat
+        hoarding = copy.deepcopy(base_obs)
+        hoarding["economy"]["cash"] = 10000  # +5000 cash
+        hoarding["military"]["assets_value"] = 5000  # unchanged
+        hoarding["tick"] = 1
+
+        # Investing agent: cash flat, assets grow
+        investing = copy.deepcopy(base_obs)
+        investing["economy"]["cash"] = 5000  # unchanged
+        investing["military"]["assets_value"] = 10000  # +5000 assets
+        investing["tick"] = 1
+
+        v_hoard = c1.compute(hoarding)
+        v_invest = c2.compute(investing)
+
+        # Same total growth (+5000) but investor should score higher
+        assert v_invest.economy > v_hoard.economy

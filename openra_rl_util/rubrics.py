@@ -17,7 +17,7 @@ There are two intentionally separate scoring systems:
 
 2. **Benchmark Score** (this file):
    - Episode-level composite score for leaderboard ranking
-   - Components: win rate (50%), military efficiency (25%), economy (25%)
+   - Components: win rate (50%), military efficiency (20%), economy (20%), speed (10%)
    - Normalized to 0-100 scale
    - Used by OpenRA-Bench evaluation harness
 
@@ -82,7 +82,7 @@ class MilitaryEfficiencyRubric(TrajectoryRubric):
         deaths = getattr(military, "deaths_cost", 0)
         total = kills + deaths
         if total == 0:
-            return 0.5  # No combat occurred
+            return 0.0  # No combat = no military score
         return kills / total
 
     def compute_step_rewards(self) -> List[float]:
@@ -117,29 +117,53 @@ class EconomyRubric(TrajectoryRubric):
         return [score] * len(self._trajectory)
 
 
-class OpenRABenchRubric(WeightedSum):
-    """Composite benchmark score combining win/loss, military, and economy.
+class GameLengthRubric(TrajectoryRubric):
+    """Score based on game speed — faster decisive games score higher.
 
-    Weights: 50% win/loss, 25% military efficiency, 25% economy.
+    Score = 1.0 / (1.0 + ticks / 3000)
+    Sigmoid-like decay: 1.0 at tick 0, 0.5 at 3000, ~0.23 at 10000.
+    """
+
+    def score_trajectory(self, trajectory: List[Tuple[Any, Any]]) -> float:
+        if not trajectory:
+            return 0.0
+        _, final_obs = trajectory[-1]
+        ticks = getattr(final_obs, "tick", 0)
+        return 1.0 / (1.0 + ticks / 3000)
+
+    def compute_step_rewards(self) -> List[float]:
+        if not self._trajectory:
+            return []
+        score = self.score_trajectory(self._trajectory)
+        return [score] * len(self._trajectory)
+
+
+class OpenRABenchRubric(WeightedSum):
+    """Composite benchmark score combining win/loss, military, economy, and speed.
+
+    Weights: 50% win/loss, 20% military efficiency, 20% economy, 10% speed.
     """
 
     def __init__(self, gamma: float = 0.99):
         win_loss = OpenRAWinLossRubric(gamma=gamma)
         military = MilitaryEfficiencyRubric()
         economy = EconomyRubric()
+        speed = GameLengthRubric()
         super().__init__(
-            rubrics=[win_loss, military, economy],
-            weights=[0.5, 0.25, 0.25],
+            rubrics=[win_loss, military, economy, speed],
+            weights=[0.5, 0.20, 0.20, 0.10],
         )
         # Keep named references for direct access
         self.win_loss = win_loss
         self.military = military
         self.economy = economy
+        self.speed = speed
 
     def reset(self) -> None:
         self.win_loss.reset()
         self.military.reset()
         self.economy.reset()
+        self.speed.reset()
 
 
 def compute_game_metrics(final_obs: Any) -> Dict[str, Any]:
@@ -174,17 +198,18 @@ def compute_game_metrics(final_obs: Any) -> Dict[str, Any]:
     }
 
 
-def compute_composite_score_from_games(game_results: List[Dict[str, Any]]) -> float:
+def compute_composite_score_from_games(
+    game_results: List[Dict[str, Any]],
+    difficulty: str = "Normal",
+) -> float:
     """Compute the OpenRA-Bench composite score from aggregated game results.
 
     This is the single source of truth for benchmark scoring. The formula
-    matches OpenRABenchRubric: 50% win rate + 25% military efficiency + 25% economy.
-
-    Per-game rubric formulas are averaged (not ratio-then-normalize) to avoid
-    Jensen's inequality distortion on multi-game aggregation.
+    matches OpenRABenchRubric: 50% win + 20% military + 20% economy + 10% speed.
 
     Args:
         game_results: List of dicts from compute_game_metrics().
+        difficulty: AI opponent difficulty for score scaling.
 
     Returns:
         Composite score on 0-100 scale.
@@ -201,7 +226,7 @@ def compute_composite_score_from_games(game_results: List[Dict[str, Any]]) -> fl
     for g in game_results:
         kills, deaths = g["kills_cost"], g["deaths_cost"]
         total_cost = kills + deaths
-        mil_scores.append(kills / total_cost if total_cost > 0 else 0.5)
+        mil_scores.append(kills / total_cost if total_cost > 0 else 0.0)
     avg_mil = sum(mil_scores) / total
 
     # Per-game economy, then average (matches EconomyRubric)
@@ -211,4 +236,11 @@ def compute_composite_score_from_games(game_results: List[Dict[str, Any]]) -> fl
         econ_scores.append(assets / (assets + 10000) if assets >= 0 else 0.0)
     avg_econ = sum(econ_scores) / total
 
-    return 100.0 * (0.5 * win_rate + 0.25 * avg_mil + 0.25 * avg_econ)
+    # Per-game speed, then average (matches GameLengthRubric)
+    speed_scores = []
+    for g in game_results:
+        ticks = g.get("ticks", 0)
+        speed_scores.append(1.0 / (1.0 + ticks / 3000))
+    avg_speed = sum(speed_scores) / total
+
+    return 100.0 * (0.5 * win_rate + 0.20 * avg_mil + 0.20 * avg_econ + 0.10 * avg_speed)
