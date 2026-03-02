@@ -4,6 +4,7 @@ import pytest
 
 from openra_rl_util.rubrics import (
     EconomyRubric,
+    GameLengthRubric,
     MilitaryEfficiencyRubric,
     OpenRABenchRubric,
     OpenRAWinLossRubric,
@@ -59,11 +60,11 @@ class TestMilitaryEfficiency:
         assert r.score_trajectory(trajectory) == 0.5
 
     def test_no_combat(self):
-        """No kills and no deaths = 0.5 (neutral)."""
+        """No kills and no deaths = 0.0 (no military credit for avoiding combat)."""
         r = MilitaryEfficiencyRubric()
         obs = MockObs(kills_cost=0, deaths_cost=0)
         trajectory = [(None, obs)]
-        assert r.score_trajectory(trajectory) == 0.5
+        assert r.score_trajectory(trajectory) == 0.0
 
     def test_favorable_ratio(self):
         r = MilitaryEfficiencyRubric()
@@ -113,6 +114,33 @@ class TestEconomyRubric:
         assert r.score_trajectory([]) == 0.0
 
 
+class TestGameLengthRubric:
+    """Test game speed scoring."""
+
+    def test_instant_game(self):
+        r = GameLengthRubric()
+        obs = MockObs(tick=0)
+        trajectory = [(None, obs)]
+        assert r.score_trajectory(trajectory) == 1.0
+
+    def test_medium_game(self):
+        r = GameLengthRubric()
+        obs = MockObs(tick=3000)
+        trajectory = [(None, obs)]
+        assert r.score_trajectory(trajectory) == 0.5
+
+    def test_long_game(self):
+        r = GameLengthRubric()
+        obs = MockObs(tick=10000)
+        trajectory = [(None, obs)]
+        score = r.score_trajectory(trajectory)
+        assert abs(score - 1.0 / (1.0 + 10000 / 3000)) < 0.01
+
+    def test_empty_trajectory(self):
+        r = GameLengthRubric()
+        assert r.score_trajectory([]) == 0.0
+
+
 class TestCompositeRubric:
     """Test the combined benchmark rubric."""
 
@@ -121,7 +149,7 @@ class TestCompositeRubric:
         obs = MockObs(result="win", kills_cost=10000, deaths_cost=0, assets_value=50000)
         # WeightedSum uses forward() per step, not score_trajectory
         score = r(None, obs)
-        # 50% * 1.0 + 25% * 1.0 + 25% * (50000/60000) = 0.5 + 0.25 + 0.208 = 0.958
+        # 50% * 1.0 + 20% * 1.0 + 20% * (50000/60000) + 10% * speed
         assert score > 0.9
 
     def test_reset_clears_state(self):
@@ -172,24 +200,24 @@ class TestCompositeScoreFromGames:
 
     def test_all_wins_perfect(self):
         games = [
-            {"win": True, "kills_cost": 10000, "deaths_cost": 0, "assets_value": 50000},
-            {"win": True, "kills_cost": 8000, "deaths_cost": 0, "assets_value": 40000},
+            {"win": True, "kills_cost": 10000, "deaths_cost": 0, "assets_value": 50000, "ticks": 2000},
+            {"win": True, "kills_cost": 8000, "deaths_cost": 0, "assets_value": 40000, "ticks": 2000},
         ]
         score = compute_composite_score_from_games(games)
         assert score > 90  # Near-perfect across all dimensions
 
     def test_all_losses(self):
         games = [
-            {"win": False, "kills_cost": 0, "deaths_cost": 10000, "assets_value": 0},
-            {"win": False, "kills_cost": 0, "deaths_cost": 5000, "assets_value": 0},
+            {"win": False, "kills_cost": 0, "deaths_cost": 10000, "assets_value": 0, "ticks": 5000},
+            {"win": False, "kills_cost": 0, "deaths_cost": 5000, "assets_value": 0, "ticks": 3000},
         ]
         score = compute_composite_score_from_games(games)
-        assert score < 10  # Very low but not zero (no-combat = 0.5 mil)
+        assert score < 10  # Very low
 
     def test_mixed_results(self):
         games = [
-            {"win": True, "kills_cost": 8000, "deaths_cost": 2000, "assets_value": 15000},
-            {"win": False, "kills_cost": 3000, "deaths_cost": 7000, "assets_value": 5000},
+            {"win": True, "kills_cost": 8000, "deaths_cost": 2000, "assets_value": 15000, "ticks": 2000},
+            {"win": False, "kills_cost": 3000, "deaths_cost": 7000, "assets_value": 5000, "ticks": 2000},
         ]
         score = compute_composite_score_from_games(games)
         assert 20 < score < 80
@@ -197,24 +225,26 @@ class TestCompositeScoreFromGames:
     def test_score_range(self):
         """Score should always be 0-100."""
         games = [
-            {"win": True, "kills_cost": 10000, "deaths_cost": 0, "assets_value": 999999},
+            {"win": True, "kills_cost": 10000, "deaths_cost": 0, "assets_value": 999999, "ticks": 2000},
         ]
         score = compute_composite_score_from_games(games)
         assert 0 <= score <= 100
 
     def test_no_combat_games(self):
         games = [
-            {"win": True, "kills_cost": 0, "deaths_cost": 0, "assets_value": 10000},
+            {"win": True, "kills_cost": 0, "deaths_cost": 0, "assets_value": 10000, "ticks": 2000},
         ]
         score = compute_composite_score_from_games(games)
-        # 50% * 1.0 + 25% * 0.5 + 25% * 0.5 = 75.0
-        assert abs(score - 75.0) < 0.1
+        # 50%*1.0 + 20%*0.0 + 20%*0.5 + 10%*(1/(1+2000/3000))
+        # = 50 + 0 + 10 + 10*(0.6) = 66.0
+        assert abs(score - 66.0) < 0.5
 
     def test_single_game_matches_rubric(self):
         """Composite score from 1 game should match rubric computation."""
         games = [
-            {"win": True, "kills_cost": 8000, "deaths_cost": 2000, "assets_value": 20000},
+            {"win": True, "kills_cost": 8000, "deaths_cost": 2000, "assets_value": 20000, "ticks": 1500},
         ]
         score = compute_composite_score_from_games(games)
-        # Manual: 50%*1.0 + 25%*(8000/10000) + 25%*(20000/30000) = 50 + 20 + 16.67 = 86.67
-        assert abs(score - 86.67) < 0.1
+        # 50%*1.0 + 20%*(8000/10000) + 20%*(20000/30000) + 10%*(1/(1+0.5))
+        # = 50 + 16 + 13.33 + 6.67 = 86.0
+        assert abs(score - 86.0) < 0.5

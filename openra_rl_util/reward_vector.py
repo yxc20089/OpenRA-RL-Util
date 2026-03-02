@@ -301,7 +301,10 @@ class RewardVectorComputer:
         prev_total = self._state.prev_cash + self._state.prev_ore + self._state.prev_assets_value
         curr_total = cash + ore + assets
         econ_delta = curr_total - prev_total
-        reward += econ_delta / ECONOMY_NORMALIZER
+
+        # Investment-adjusted: reward spending on assets more than hoarding cash
+        investment_ratio = assets / max(cash + assets, 1)
+        reward += (econ_delta / ECONOMY_NORMALIZER) * (0.5 + 0.5 * investment_ratio)
 
         # Enemy harvester kills (detect by counting visible enemy harvesters)
         enemy_harv_count = sum(
